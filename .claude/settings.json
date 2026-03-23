@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "rsync -a --exclude='.git' --exclude='*.zip' --exclude='*.exe' --exclude='watchtower.log' --exclude='meshcentral-data' --exclude='meshcentral-backups' --exclude='meshcentral-files' /mnt/hgfs/assist/code/meshcentral/ /opt/watchtower_c2/ 2>/dev/null || true",
+            "command": "rsync -a --exclude='.git' --exclude='*.zip' --exclude='/*.exe' --exclude='watchtower.log' --exclude='meshcentral-data' --exclude='meshcentral-backups' --exclude='meshcentral-files' /mnt/hgfs/assist/code/meshcentral/ /opt/watchtower_c2/ 2>/dev/null; find /opt/watchtower_c2 -name '*.sh' -exec sed -i 's/\\r//' {} \\; -exec chmod +x {} \\; 2>/dev/null || true",
             "statusMessage": "Deploying to /opt/watchtower_c2..."
           }
         ]

