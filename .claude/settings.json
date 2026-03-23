@@ -7,6 +7,11 @@
             "type": "command",
             "command": "cd /mnt/hgfs/assist/code/meshcentral && git add -A && (git diff --cached --quiet || (git commit -m \"auto-sync $(date '+%Y-%m-%d %H:%M')\" && git push)) 2>/dev/null || true",
             "statusMessage": "Syncing to GitHub..."
+          },
+          {
+            "type": "command",
+            "command": "rsync -a --exclude='.git' --exclude='*.zip' --exclude='*.exe' --exclude='watchtower.log' --exclude='meshcentral-data' --exclude='meshcentral-backups' --exclude='meshcentral-files' /mnt/hgfs/assist/code/meshcentral/ /opt/watchtower_c2/ 2>/dev/null || true",
+            "statusMessage": "Deploying to /opt/watchtower_c2..."
           }
         ]
       }
