@@ -1,0 +1,22 @@
+# Sensitive data — never commit
+meshcentral-data/
+meshcentral-backups/
+meshcentral-files/
+
+# Logs
+watchtower.log
+*.log
+
+# Binaries and archives
+*.exe
+*.zip
+
+# Node dependencies
+node_modules/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Windows reserved device names (hgfs/VMFS artifact)
+nul

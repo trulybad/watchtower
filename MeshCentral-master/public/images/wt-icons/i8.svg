@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+  <!-- Host monitor frame — purple border -->
+  <rect x="4" y="5" width="42" height="29" rx="3" fill="#0d1520" stroke="#a855f7" stroke-width="1.5"/>
+  <!-- Screen glass -->
+  <rect x="7" y="8" width="36" height="23" rx="1" fill="#060810"/>
+  <!-- Guest VM window — back layer (slightly offset) -->
+  <rect x="9" y="10" width="22" height="14" rx="1.5" fill="none" stroke="#a855f7" stroke-width="0.9" opacity="0.35"/>
+  <!-- Guest VM window — front layer -->
+  <rect x="15" y="14" width="22" height="14" rx="1.5" fill="#0d1520" stroke="#a855f7" stroke-width="1.2"/>
+  <!-- VM window titlebar -->
+  <rect x="15" y="14" width="22" height="4" rx="1.5" fill="#a855f7" opacity="0.22"/>
+  <!-- Titlebar traffic-light dots -->
+  <circle cx="18" cy="16" r="1" fill="#a855f7" opacity="0.7"/>
+  <circle cx="21.5" cy="16" r="1" fill="#a855f7" opacity="0.5"/>
+  <circle cx="25" cy="16" r="1" fill="#a855f7" opacity="0.35"/>
+  <!-- VM window content lines -->
+  <line x1="18" y1="22" x2="27" y2="22" stroke="#a855f7" stroke-width="1" opacity="0.8"/>
+  <line x1="18" y1="25" x2="34" y2="25" stroke="#a855f7" stroke-width="0.8" opacity="0.5"/>
+  <!-- Stand neck -->
+  <rect x="23" y="34" width="4" height="6" rx="1" fill="#0d1520" stroke="#a855f7" stroke-width="1"/>
+  <!-- Stand base -->
+  <rect x="15" y="40" width="20" height="3" rx="1.5" fill="#0d1520" stroke="#a855f7" stroke-width="1.2"/>
+  <!-- VM badge bottom-right -->
+  <rect x="33" y="26.5" width="9" height="5" rx="1" fill="#a855f7" opacity="0.85"/>
+  <rect x="34" y="27.5" width="3" height="3" rx="0.5" fill="#fff" opacity="0.9"/>
+  <line x1="39" y1="28" x2="41" y2="28" stroke="#fff" stroke-width="1" opacity="0.8"/>
+  <line x1="39" y1="30" x2="41" y2="30" stroke="#fff" stroke-width="0.7" opacity="0.6"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+  <!-- Outer hexagon -->
+  <polygon points="25,4 44,14.5 44,35.5 25,46 6,35.5 6,14.5" fill="#0d1520" stroke="#00d4ff" stroke-width="1.5"/>
+  <!-- Inner hexagon ring -->
+  <polygon points="25,12 37,19 37,31 25,38 13,31 13,19" fill="none" stroke="#00d4ff" stroke-width="0.7" opacity="0.3"/>
+  <!-- Center node -->
+  <circle cx="25" cy="25" r="5.5" fill="none" stroke="#00ff41" stroke-width="1.5"/>
+  <circle cx="25" cy="25" r="2.5" fill="#00ff41" opacity="0.85"/>
+  <!-- Spokes to inner hex vertices -->
+  <line x1="25" y1="19.5" x2="25" y2="14.5" stroke="#00ff41" stroke-width="0.9" opacity="0.5"/>
+  <line x1="29.8" y1="27.8" x2="34.5" y2="30.5" stroke="#00ff41" stroke-width="0.9" opacity="0.5"/>
+  <line x1="20.2" y1="27.8" x2="15.5" y2="30.5" stroke="#00ff41" stroke-width="0.9" opacity="0.5"/>
+  <!-- Corner accent dots -->
+  <circle cx="25" cy="5.5"  r="1.2" fill="#00d4ff" opacity="0.5"/>
+  <circle cx="42.5" cy="15.5" r="1.2" fill="#00d4ff" opacity="0.5"/>
+  <circle cx="42.5" cy="34.5" r="1.2" fill="#00d4ff" opacity="0.5"/>
+</svg>
