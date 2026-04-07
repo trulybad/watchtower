@@ -77,6 +77,42 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         }}));
     }
     obj.app.disable('x-powered-by');
+
+    // ── WATCHTOWER: proxy /wtop/* → localhost:8443/op/* ──────────────────────
+    obj.app.all('/wtop/*', function(req, res) {
+        var https = require('https');
+        var opPath = '/op/' + req.params[0];
+        if (req.url.indexOf('?') !== -1) opPath += req.url.substring(req.url.indexOf('?'));
+        var body = [];
+        req.on('data', function(chunk) { body.push(chunk); });
+        req.on('end', function() {
+            var bodyData = Buffer.concat(body);
+            var opts = {
+                hostname: '127.0.0.1',
+                port: 8443,
+                path: opPath,
+                method: req.method,
+                rejectUnauthorized: false,
+                headers: {}
+            };
+            // Forward relevant headers
+            if (req.headers['authorization']) opts.headers['authorization'] = req.headers['authorization'];
+            if (req.headers['content-type']) opts.headers['content-type'] = req.headers['content-type'];
+            if (bodyData.length > 0) opts.headers['content-length'] = bodyData.length;
+            var proxyReq = https.request(opts, function(proxyRes) {
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                proxyRes.pipe(res, { end: true });
+            });
+            proxyReq.on('error', function(e) {
+                res.status(502).json({ error: 'WTAgent C2 unreachable', detail: e.message });
+            });
+            if (bodyData.length > 0) proxyReq.write(bodyData);
+            proxyReq.end();
+        });
+    });
+    // ─────────────────────────────────────────────────────────────────────────
+
     obj.tlsServer = null;
     obj.tcpServer = null;
     obj.certificates = certificates;

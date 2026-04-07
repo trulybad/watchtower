@@ -142,7 +142,7 @@ fi
 
 # Compile with mcs
 if [[ "$CSC" == "mcs" ]]; then
-    mcs -target:exe -platform:x86_64 -optimize+ -unsafe \
+    mcs -target:exe -platform:x64 -optimize+ -unsafe \
         -r:System.Windows.Forms.dll \
         -r:System.Drawing.dll \
         -out:"$OUT_FILE" \

@@ -5181,26 +5181,24 @@
     // Section 27: WTAgent C2 Panel
     // Operator interface for wt_c2_server.js agents (separate from
     // MeshCentral agents). Polls /op/agents via Bearer token auth.
-    // Config stored in localStorage: wt_agent_url, wt_agent_token
+    // Config stored in localStorage: wt_agent_token (URL proxied via /wtop/)
     // ============================================================
     var wtAgentPanelVisible = false;
     var wtAgentPollTimer    = null;
     var wtAgentSelected     = null;    // currently selected agent ID
     var wtAgentResultTimer  = null;
 
-    function wtAgentApiBase() {
-        return (localStorage.getItem('wt_agent_url') || '').replace(/\/$/, '');
-    }
     function wtAgentToken() {
         return localStorage.getItem('wt_agent_token') || '';
     }
 
     function wtAgentFetch(path, opts) {
-        var base  = wtAgentApiBase();
         var token = wtAgentToken();
-        if (!base || !token) return Promise.reject(new Error('WTAgent: no URL/token configured'));
+        if (!token) return Promise.reject(new Error('WTAgent: no token configured'));
+        // Rewrite /op/... → /wtop/... (proxied through MeshCentral on port 443)
+        var proxyPath = path.replace(/^\/op\//, '/wtop/');
         var headers = Object.assign({ 'Authorization': 'Bearer ' + token }, (opts && opts.headers) || {});
-        return fetch(base + path, Object.assign({}, opts, { headers: headers }));
+        return fetch(proxyPath, Object.assign({}, opts, { headers: headers }));
     }
 
     function injectWTAgentButton() {
@@ -5247,9 +5245,7 @@
             '  </span>',
             '</div>',
             '<div id="wtAgentConfigBox" class="wt-agent-config-box" style="display:none">',
-            '  <label>C2 API URL (e.g. https://192.168.1.50:8443)</label>',
-            '  <input id="wtAgentUrlInput" class="wt-agent-input" type="text" placeholder="https://host:8443" />',
-            '  <label>Operator Token</label>',
+            '  <label>Operator Token (from wt_op_token.txt)</label>',
             '  <input id="wtAgentTokInput" class="wt-agent-input" type="password" placeholder="paste token from wt_op_token.txt" />',
             '  <button class="wt-agent-save-btn" onclick="wtAgentSaveConfig()">SAVE</button>',
             '</div>',
@@ -5294,7 +5290,6 @@
         anchor.parentNode.insertBefore(panel, anchor.nextSibling);
 
         // Pre-fill config inputs if already saved
-        document.getElementById('wtAgentUrlInput').value = wtAgentApiBase();
         document.getElementById('wtAgentTokInput').value = wtAgentToken();
 
         wtAgentPanelVisible = true;
@@ -5302,7 +5297,7 @@
         if (btn) btn.classList.add('wt-toolbar-btn-active');
 
         // Auto-show config if not configured yet
-        if (!wtAgentApiBase() || !wtAgentToken()) wtAgentShowConfig();
+        if (!wtAgentToken()) wtAgentShowConfig();
 
         startWTAgentPoll();
     }
@@ -5314,10 +5309,8 @@
     }
 
     function wtAgentSaveConfig() {
-        var u = (document.getElementById('wtAgentUrlInput').value || '').trim().replace(/\/$/, '');
         var t = (document.getElementById('wtAgentTokInput').value || '').trim();
-        if (!u || !t) return;
-        localStorage.setItem('wt_agent_url', u);
+        if (!t) return;
         localStorage.setItem('wt_agent_token', t);
         var box = document.getElementById('wtAgentConfigBox');
         if (box) box.style.display = 'none';
